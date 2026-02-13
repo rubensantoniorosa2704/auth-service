@@ -1,79 +1,200 @@
 package services_test
 
 import (
+	"context"
+	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/rubensantoniorosa2704/auth-service/internal/core/domain"
 	"github.com/rubensantoniorosa2704/auth-service/internal/core/services"
 )
 
-// =====================
-// Test helper
-// =====================
-
+// newAuthService creates a fully wired AuthService with fakes for testing.
 func newAuthService() *services.AuthService {
 	repo := newFakeUserRepo()
 	hasher := &fakeHasher{}
 	token := &fakeTokenService{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	return services.NewAuthService(repo, hasher, token)
+	return services.NewAuthService(repo, hasher, token, logger)
 }
 
 // =====================
-// Tests
+// Register tests
 // =====================
 
-func TestRegister_Success(t *testing.T) {
-	service := newAuthService()
+func TestRegister(t *testing.T) {
+	t.Parallel()
 
-	err := service.Register("test@email.com", "123456")
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+	tests := []struct {
+		name     string
+		email    string
+		password string
+		setup    func(svc *services.AuthService)
+		wantErr  error
+		wantID   bool
+	}{
+		{
+			name:     "success",
+			email:    "user@example.com",
+			password: "securepassword",
+			wantID:   true,
+		},
+		{
+			name:     "duplicate email",
+			email:    "dup@example.com",
+			password: "securepassword",
+			setup: func(svc *services.AuthService) {
+				_, _ = svc.Register(context.Background(), "dup@example.com", "securepassword")
+			},
+			wantErr: domain.ErrUserAlreadyExists,
+		},
+		{
+			name:     "invalid email format",
+			email:    "not-an-email",
+			password: "securepassword",
+			wantErr:  domain.ErrInvalidEmail,
+		},
+		{
+			name:     "empty email",
+			email:    "",
+			password: "securepassword",
+			wantErr:  domain.ErrInvalidEmail,
+		},
+		{
+			name:     "weak password",
+			email:    "short@example.com",
+			password: "1234567",
+			wantErr:  domain.ErrWeakPassword,
+		},
+		{
+			name:     "empty password",
+			email:    "empty@example.com",
+			password: "",
+			wantErr:  domain.ErrWeakPassword,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			svc := newAuthService()
+			ctx := context.Background()
+
+			if tt.setup != nil {
+				tt.setup(svc)
+			}
+
+			userID, err := svc.Register(ctx, tt.email, tt.password)
+
+			if tt.wantErr != nil {
+				assertErrorIs(t, err, tt.wantErr)
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tt.wantID && userID == "" {
+				t.Fatal("expected non-empty user ID")
+			}
+		})
 	}
 }
 
-func TestRegister_UserAlreadyExists(t *testing.T) {
-	service := newAuthService()
+// =====================
+// Login tests
+// =====================
 
-	_ = service.Register("test@email.com", "123456")
-	err := service.Register("test@email.com", "123456")
+func TestLogin(t *testing.T) {
+	t.Parallel()
 
-	if err != domain.ErrUserAlreadyExists {
-		t.Fatalf("expected ErrUserAlreadyExists, got %v", err)
+	tests := []struct {
+		name      string
+		email     string
+		password  string
+		wantErr   error
+		wantToken bool
+	}{
+		{
+			name:      "success",
+			email:     "login@example.com",
+			password:  "securepassword",
+			wantToken: true,
+		},
+		{
+			name:     "wrong password",
+			email:    "login@example.com",
+			password: "wrong-password",
+			wantErr:  domain.ErrInvalidCredentials,
+		},
+		{
+			name:     "user not found",
+			email:    "ghost@example.com",
+			password: "securepassword",
+			wantErr:  domain.ErrInvalidCredentials,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			svc := newAuthService()
+			ctx := context.Background()
+
+			// Seed user for login tests that expect an existing user
+			if tt.email == "login@example.com" {
+				if _, err := svc.Register(ctx, "login@example.com", "securepassword"); err != nil {
+					t.Fatalf("failed to seed user: %v", err)
+				}
+			}
+
+			token, err := svc.Login(ctx, tt.email, tt.password)
+
+			if tt.wantErr != nil {
+				assertErrorIs(t, err, tt.wantErr)
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tt.wantToken && token == "" {
+				t.Fatal("expected non-empty token")
+			}
+		})
 	}
 }
 
-func TestLogin_Success(t *testing.T) {
-	service := newAuthService()
+// assertErrorIs is a test helper that checks if err wraps the target error.
+func assertErrorIs(t *testing.T, err, target error) {
+	t.Helper()
 
-	_ = service.Register("test@email.com", "123456")
-
-	token, err := service.Login("test@email.com", "123456")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatalf("expected error %q, got nil", target)
 	}
 
-	if token == "" {
-		t.Fatal("expected token, got empty string")
+	if !containsError(err, target) {
+		t.Fatalf("expected error wrapping %q, got %q", target, err)
 	}
 }
 
-func TestLogin_InvalidPassword(t *testing.T) {
-	service := newAuthService()
-
-	_ = service.Register("test@email.com", "123456")
-
-	_, err := service.Login("test@email.com", "wrong-password")
-	if err != domain.ErrInvalidCredentials {
-		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
+// containsError checks via errors.Is or, for wrapped fmt.Errorf errors, via Unwrap.
+func containsError(err, target error) bool {
+	for e := err; e != nil; {
+		if e == target {
+			return true
+		}
+		u, ok := e.(interface{ Unwrap() error })
+		if !ok {
+			break
+		}
+		e = u.Unwrap()
 	}
-}
-
-func TestLogin_UserNotFound(t *testing.T) {
-	service := newAuthService()
-
-	_, err := service.Login("notfound@email.com", "123456")
-	if err != domain.ErrInvalidCredentials {
-		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
-	}
+	return false
 }
