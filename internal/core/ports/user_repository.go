@@ -1,8 +1,13 @@
 package ports
 
-import "github.com/rubensantoniorosa2704/auth-service/internal/core/domain"
+import (
+	"context"
 
+	"github.com/rubensantoniorosa2704/auth-service/internal/core/domain"
+)
+
+// UserRepository defines the contract for user persistence.
 type UserRepository interface {
-	Save(user *domain.User) error
-	FindByEmail(email string) (*domain.User, error)
+	Save(ctx context.Context, user *domain.User) error
+	FindByEmail(ctx context.Context, email string) (*domain.User, error)
 }

@@ -1,5 +1,12 @@
 FROM mcr.microsoft.com/devcontainers/go:2-1.25-trixie
 
+RUN apt update && apt install -y protobuf-compiler
+
+# Install golang-migrate CLI
+RUN go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest \
+    && chown -R vscode:vscode /go
+
+
 # [Optional] Uncomment this section to install additional OS packages.
 # RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
 #     && apt-get -y install --no-install-recommends <your-package-list-here>

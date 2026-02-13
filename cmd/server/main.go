@@ -1,0 +1,106 @@
+package main
+
+import (
+	"context"
+	"log/slog"
+	"net"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/joho/godotenv"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
+
+	"github.com/rubensantoniorosa2704/auth-service/internal/adapters/db"
+	"github.com/rubensantoniorosa2704/auth-service/internal/adapters/encryption"
+	grpcHandler "github.com/rubensantoniorosa2704/auth-service/internal/adapters/handlers/grpc"
+	"github.com/rubensantoniorosa2704/auth-service/internal/adapters/tokens"
+	"github.com/rubensantoniorosa2704/auth-service/internal/core/services"
+	pb "github.com/rubensantoniorosa2704/auth-service/proto/auth/v1"
+)
+
+func main() {
+	// Initialize structured logger
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+	slog.SetDefault(logger)
+
+	if err := godotenv.Load(); err != nil {
+		slog.Warn("no .env file found, using system environment variables")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Database
+	dbCfg := db.Config{
+		Host:            getEnv("DB_HOST", getEnv("POSTGRES_HOST", "localhost")),
+		Port:            getEnv("DB_PORT", getEnv("POSTGRES_PORT", "5432")),
+		User:            getEnv("DB_USER", getEnv("POSTGRES_USER", "postgres")),
+		Password:        getEnv("DB_PASSWORD", getEnv("POSTGRES_PASSWORD", "")),
+		DBName:          getEnv("DB_NAME", getEnv("POSTGRES_DB", "auth")),
+		SSLMode:         getEnv("DB_SSLMODE", "disable"),
+		MaxOpenConns:    25,
+		MaxIdleConns:    5,
+		ConnMaxLifetime: 5 * time.Minute,
+	}
+
+	pool, err := db.NewConnection(ctx, dbCfg)
+	if err != nil {
+		slog.Error("failed to connect to database", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	// Adapters
+	userRepo := db.NewPostgresUserRepository(pool)
+	hasher := encryption.NewArgon2Hasher()
+	tokenSvc := tokens.NewJWTService(os.Getenv("JWT_SECRET"), "auth-service")
+
+	// Service
+	authService := services.NewAuthService(userRepo, hasher, tokenSvc, logger)
+	authHandler := grpcHandler.NewAuthGRPCHandler(authService)
+
+	// gRPC server
+	grpcPort := getEnv("GRPC_PORT", "50051")
+
+	lis, err := net.Listen("tcp", ":"+grpcPort)
+	if err != nil {
+		slog.Error("failed to listen", slog.String("port", grpcPort), slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	server := grpc.NewServer()
+	pb.RegisterAuthServiceServer(server, authHandler)
+	reflection.Register(server)
+
+	go func() {
+		slog.Info("server started", slog.String("port", grpcPort), slog.String("transport", "grpc"))
+		if err := server.Serve(lis); err != nil {
+			slog.Error("grpc serve failed", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+	}()
+
+	// Graceful shutdown
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+
+	sig := <-stop
+	slog.Info("shutdown signal received", slog.String("signal", sig.String()))
+
+	server.GracefulStop()
+	cancel()
+	slog.Info("server stopped gracefully")
+}
+
+// getEnv returns the value of an environment variable or a default fallback.
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}

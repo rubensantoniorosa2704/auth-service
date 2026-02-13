@@ -1,69 +1,88 @@
 # Auth Service
 
-Auth Service is a simple and professional authentication microservice built with Go.
-It was created as a portfolio project to demonstrate clean architecture, gRPC communication,
-and good backend engineering practices.
+A production-grade authentication microservice built with Go, designed to demonstrate clean architecture,
+gRPC communication, and industry-standard backend engineering practices.
 
-## ✨ Features
+## Features
 
-- User registration
-- User authentication (login)
-- Password hashing using Argon2id
-- JWT token generation
-- gRPC API using Protocol Buffers
-- PostgreSQL as database
-- Clean Architecture (Hexagonal Architecture)
-- Unit tests with mocks
-- Environment configuration with Viper
-- Docker and DevContainer support
+- **User Registration** — with email and password validation (domain value objects)
+- **User Authentication** — login with JWT token generation
+- **Argon2id Password Hashing** — memory-hard, timing-safe password storage
+- **gRPC API** — strongly typed contracts with Protocol Buffers
+- **PostgreSQL** — persistent storage with [sqlc](https://sqlc.dev) type-safe queries
+- **Hexagonal Architecture** — strict separation of domain, ports, and adapters
+- **Structured Logging** — using Go's standard `log/slog` (JSON output)
+- **Context Propagation** — `context.Context` flows from gRPC handler through every layer
+- **Graceful Shutdown** — signal-aware server lifecycle management
+- **Table-Driven Tests** — comprehensive unit tests with parallel execution
 
-## 🛠 Tech Stack
+## Tech Stack
 
-- Go 1.22+
-- gRPC + Protocol Buffers
-- PostgreSQL
-- Docker & Docker Compose
-- Viper
-- JWT
-- Argon2id
+| Category       | Technology                                |
+|----------------|-------------------------------------------|
+| Language       | Go 1.22+                                  |
+| Transport      | gRPC + Protocol Buffers                   |
+| Database       | PostgreSQL (pgx v5 + sqlc)                |
+| Authentication | JWT (golang-jwt/v5)                       |
+| Hashing        | Argon2id (golang.org/x/crypto)            |
+| Logging        | log/slog (standard library)               |
+| Infrastructure | Docker, Docker Compose, DevContainers     |
 
-## 📂 Project Structure
+## Project Structure
 
 ```
-cmd/                # Application entrypoints
+cmd/server/             Application entrypoint
 internal/
   core/
-    domain/         # Domain entities and business rules
-    ports/          # Interfaces (ports)
-    services/       # Use cases / application services
-  adapters/         # Infrastructure adapters (database, grpc, etc.)
+    domain/             Value objects, entities, domain errors
+    ports/              Interfaces (driven + driving ports)
+    services/           Use cases / application services
+  adapters/
+    db/                 PostgreSQL repository (pgx + sqlc)
+    encryption/         Argon2id password hasher
+    handlers/grpc/      gRPC transport handler
+    tokens/             JWT token service
+proto/auth/v1/          Protocol Buffer definitions
 ```
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
 - Go 1.22 or higher
 - Docker and Docker Compose
 
-### Running the project
+### Running with Docker
 
-```
+```bash
 docker compose up
 ```
 
-Or run locally:
+### Running locally
 
-```
-go run ./cmd/auth
-```
-
-## 🧪 Running Tests
-
-```
-go test ./internal/...
+```bash
+make server
 ```
 
-## 📜 License
+### Running Tests
+
+```bash
+make test
+```
+
+## Environment Variables
+
+| Variable        | Description                  | Default     |
+|-----------------|------------------------------|-------------|
+| `DB_HOST`       | PostgreSQL host              | `localhost` |
+| `DB_PORT`       | PostgreSQL port              | `5432`      |
+| `DB_USER`       | PostgreSQL user              | `postgres`  |
+| `DB_PASSWORD`   | PostgreSQL password          | —           |
+| `DB_NAME`       | Database name                | `auth`      |
+| `DB_SSLMODE`    | SSL mode                     | `disable`   |
+| `JWT_SECRET`    | Secret key for JWT signing   | —           |
+| `GRPC_PORT`     | Port for gRPC server         | `50051`     |
+
+## License
 
 This project is licensed under the [MIT License](./LICENSE.md).

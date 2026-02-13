@@ -1,6 +1,7 @@
 package services_test
 
 import (
+	"context"
 	"errors"
 
 	"github.com/rubensantoniorosa2704/auth-service/internal/core/domain"
@@ -20,12 +21,12 @@ func newFakeUserRepo() *fakeUserRepo {
 	}
 }
 
-func (f *fakeUserRepo) Save(user *domain.User) error {
+func (f *fakeUserRepo) Save(_ context.Context, user *domain.User) error {
 	f.users[user.Email.String()] = user
 	return nil
 }
 
-func (f *fakeUserRepo) FindByEmail(email string) (*domain.User, error) {
+func (f *fakeUserRepo) FindByEmail(_ context.Context, email string) (*domain.User, error) {
 	user, ok := f.users[email]
 	if !ok {
 		return nil, errors.New("user not found")
@@ -39,12 +40,12 @@ func (f *fakeUserRepo) FindByEmail(email string) (*domain.User, error) {
 
 type fakeHasher struct{}
 
-func (f *fakeHasher) Hash(password string) (string, error) {
+func (f *fakeHasher) Hash(_ context.Context, password string) (string, error) {
 	return "hashed-" + password, nil
 }
 
-func (f *fakeHasher) Verify(password, hash string) bool {
-	return hash == "hashed-"+password
+func (f *fakeHasher) Verify(_ context.Context, password, hash string) (bool, error) {
+	return hash == "hashed-"+password, nil
 }
 
 // =====================
@@ -53,10 +54,10 @@ func (f *fakeHasher) Verify(password, hash string) bool {
 
 type fakeTokenService struct{}
 
-func (f *fakeTokenService) Generate(userID string) (string, error) {
+func (f *fakeTokenService) Generate(_ context.Context, userID string) (string, error) {
 	return "token-for-" + userID, nil
 }
 
-func (f *fakeTokenService) Validate(token string) (string, error) {
+func (f *fakeTokenService) Validate(_ context.Context, _ string) (string, error) {
 	return "", nil
 }
