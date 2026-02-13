@@ -2,18 +2,20 @@ package db
 
 import (
 	"context"
-	"log"
+	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func NewConnection(cfg Config) (*pgxpool.Pool, error) {
+// NewConnection creates a new PostgreSQL connection pool from the given config.
+func NewConnection(ctx context.Context, cfg Config) (*pgxpool.Pool, error) {
 	dsn := cfg.DSN()
 
 	poolConfig, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parsing pool config: %w", err)
 	}
 
 	poolConfig.MaxConns = int32(cfg.MaxOpenConns)
@@ -21,15 +23,19 @@ func NewConnection(cfg Config) (*pgxpool.Pool, error) {
 	poolConfig.MaxConnLifetime = cfg.ConnMaxLifetime
 	poolConfig.MaxConnIdleTime = 30 * time.Minute
 
-	pool, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("creating connection pool: %w", err)
 	}
 
-	if err := pool.Ping(context.Background()); err != nil {
-		return nil, err
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("pinging database: %w", err)
 	}
 
-	log.Println("Database connection estabilished")
+	slog.InfoContext(ctx, "database connection established",
+		slog.String("host", cfg.Host),
+		slog.String("database", cfg.DBName),
+	)
 	return pool, nil
 }

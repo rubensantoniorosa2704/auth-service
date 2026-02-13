@@ -11,45 +11,58 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// AuthGRPCHandler translates gRPC requests into application service calls.
 type AuthGRPCHandler struct {
 	pb.UnimplementedAuthServiceServer
-	authService *services.AuthService
+	authService services.AuthServicer
 }
 
-func NewAuthGRPCHandler(svc *services.AuthService) *AuthGRPCHandler {
+// NewAuthGRPCHandler creates a handler that depends on the AuthServicer interface.
+func NewAuthGRPCHandler(svc services.AuthServicer) *AuthGRPCHandler {
 	return &AuthGRPCHandler{
 		authService: svc,
 	}
 }
 
+// Register handles user registration requests.
 func (h *AuthGRPCHandler) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error) {
-	err := h.authService.Register(req.GetEmail(), req.GetPassword())
+	userID, err := h.authService.Register(ctx, req.GetEmail(), req.GetPassword())
 	if err != nil {
-		switch {
-		case errors.Is(err, domain.ErrUserAlreadyExists):
-			return nil, status.Error(codes.AlreadyExists, "este e-mail já está cadastrado")
-		case err.Error() == "invalid email": // Ou se você tiver um ErrInvalidEmail no domain
-			return nil, status.Error(codes.InvalidArgument, "formato de e-mail inválido")
-		default:
-			return nil, status.Error(codes.Internal, "erro interno ao processar registro")
-		}
+		return nil, mapDomainError(err)
 	}
 
 	return &pb.RegisterResponse{
-		Email: req.GetEmail(),
+		UserId: userID,
+		Email:  req.GetEmail(),
 	}, nil
 }
 
+// Login handles user authentication requests.
 func (h *AuthGRPCHandler) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResponse, error) {
-	token, err := h.authService.Login(req.GetEmail(), req.GetPassword())
+	token, err := h.authService.Login(ctx, req.GetEmail(), req.GetPassword())
 	if err != nil {
-		if errors.Is(err, domain.ErrInvalidCredentials) {
-			return nil, status.Error(codes.Unauthenticated, "credenciais inválidas")
-		}
-		return nil, status.Error(codes.Internal, "erro interno ao processar login")
+		return nil, mapDomainError(err)
 	}
 
 	return &pb.LoginResponse{
 		AccessToken: token,
 	}, nil
+}
+
+// mapDomainError translates domain errors into appropriate gRPC status codes.
+func mapDomainError(err error) error {
+	switch {
+	case errors.Is(err, domain.ErrUserAlreadyExists):
+		return status.Error(codes.AlreadyExists, "email already registered")
+	case errors.Is(err, domain.ErrInvalidEmail):
+		return status.Error(codes.InvalidArgument, "invalid email format")
+	case errors.Is(err, domain.ErrWeakPassword):
+		return status.Error(codes.InvalidArgument, "password must be at least 8 characters")
+	case errors.Is(err, domain.ErrInvalidCredentials):
+		return status.Error(codes.Unauthenticated, "invalid credentials")
+	case errors.Is(err, domain.ErrUserNotFound):
+		return status.Error(codes.NotFound, "user not found")
+	default:
+		return status.Error(codes.Internal, "internal server error")
+	}
 }
