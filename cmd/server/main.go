@@ -1,7 +1,8 @@
 package main
 
 import (
-	"log"
+	"context"
+	"log/slog"
 	"net"
 	"os"
 	"os/signal"
@@ -21,43 +22,55 @@ import (
 )
 
 func main() {
+	// Initialize structured logger
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+	slog.SetDefault(logger)
+
 	if err := godotenv.Load(); err != nil {
-		log.Println("Warning: .env file not found, using system environment variables.")
+		slog.Warn("no .env file found, using system environment variables")
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Database
 	dbCfg := db.Config{
-		Host:            os.Getenv("DB_HOST"),
-		Port:            os.Getenv("DB_PORT"),
-		User:            os.Getenv("DB_USER"),
-		Password:        os.Getenv("DB_PASSWORD"),
-		DBName:          os.Getenv("DB_NAME"),
-		SSLMode:         os.Getenv("DB_SSLMODE"),
+		Host:            getEnv("DB_HOST", getEnv("POSTGRES_HOST", "localhost")),
+		Port:            getEnv("DB_PORT", getEnv("POSTGRES_PORT", "5432")),
+		User:            getEnv("DB_USER", getEnv("POSTGRES_USER", "postgres")),
+		Password:        getEnv("DB_PASSWORD", getEnv("POSTGRES_PASSWORD", "")),
+		DBName:          getEnv("DB_NAME", getEnv("POSTGRES_DB", "auth")),
+		SSLMode:         getEnv("DB_SSLMODE", "disable"),
 		MaxOpenConns:    25,
 		MaxIdleConns:    5,
 		ConnMaxLifetime: 5 * time.Minute,
 	}
 
-	pool, err := db.NewConnection(dbCfg)
+	pool, err := db.NewConnection(ctx, dbCfg)
 	if err != nil {
-		log.Fatalf("❌ Fatal error connecting to database: %v", err)
+		slog.Error("failed to connect to database", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 	defer pool.Close()
 
+	// Adapters
 	userRepo := db.NewPostgresUserRepository(pool)
 	hasher := encryption.NewArgon2Hasher()
 	tokenSvc := tokens.NewJWTService(os.Getenv("JWT_SECRET"), "auth-service")
 
-	authService := services.NewAuthService(userRepo, hasher, tokenSvc)
+	// Service
+	authService := services.NewAuthService(userRepo, hasher, tokenSvc, logger)
 	authHandler := grpcHandler.NewAuthGRPCHandler(authService)
 
-	grpcPort := os.Getenv("GRPC_PORT")
-	if grpcPort == "" {
-		grpcPort = "50051"
-	}
+	// gRPC server
+	grpcPort := getEnv("GRPC_PORT", "50051")
 
 	lis, err := net.Listen("tcp", ":"+grpcPort)
 	if err != nil {
-		log.Fatalf("❌ Failed to listen on port %s: %v", grpcPort, err)
+		slog.Error("failed to listen", slog.String("port", grpcPort), slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 
 	server := grpc.NewServer()
@@ -65,18 +78,29 @@ func main() {
 	reflection.Register(server)
 
 	go func() {
-		log.Printf("🚀 Auth-Service running on port %s", grpcPort)
+		slog.Info("server started", slog.String("port", grpcPort), slog.String("transport", "grpc"))
 		if err := server.Serve(lis); err != nil {
-			log.Fatalf("❌ Failed to serve gRPC: %v", err)
+			slog.Error("grpc serve failed", slog.String("error", err.Error()))
+			os.Exit(1)
 		}
 	}()
 
+	// Graceful shutdown
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
-	<-stop
+	sig := <-stop
+	slog.Info("shutdown signal received", slog.String("signal", sig.String()))
 
-	log.Println("\n🛑 Gracefully shutting down server...")
 	server.GracefulStop()
-	log.Println("👋 Server stopped.")
+	cancel()
+	slog.Info("server stopped gracefully")
+}
+
+// getEnv returns the value of an environment variable or a default fallback.
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
