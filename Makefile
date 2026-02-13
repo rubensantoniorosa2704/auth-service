@@ -1,6 +1,6 @@
--include .env
+-include .devcontainer/.env
 
-DB_URL=postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOSTNAME):5432/$(POSTGRES_DB)?sslmode=disable
+DB_URL=postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
 
 .PHONY: migrate-up migrate-down sqlc server test
 
