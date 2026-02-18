@@ -21,10 +21,11 @@ type AuthServicer interface {
 
 // AuthService implements the core authentication use cases.
 type AuthService struct {
-	users  ports.UserRepository
-	hasher ports.PasswordHasher
-	tokens ports.TokenService
-	logger *slog.Logger
+	users     ports.UserRepository
+	hasher    ports.PasswordHasher
+	tokens    ports.TokenService
+	logger    *slog.Logger
+	dummyHash string // Pre-computed hash for timing attack mitigation
 }
 
 // NewAuthService creates a new AuthService with the required dependencies.
@@ -34,11 +35,20 @@ func NewAuthService(
 	tokens ports.TokenService,
 	logger *slog.Logger,
 ) *AuthService {
+	// Pre-compute a dummy hash for timing attack mitigation.
+	// This hash will be used when a user doesn't exist, ensuring constant-time response.
+	dummyHash, err := hasher.Hash(context.Background(), "dummy-password-for-timing-safety")
+	if err != nil {
+		logger.Warn("failed to generate dummy hash, timing attack mitigation may be affected", slog.String("error", err.Error()))
+		dummyHash = "$argon2id$v=19$m=65536,t=1,p=4$c29tZXNhbHQxMjM0NTY$hash" // Fallback
+	}
+
 	return &AuthService{
-		users:  users,
-		hasher: hasher,
-		tokens: tokens,
-		logger: logger,
+		users:     users,
+		hasher:    hasher,
+		tokens:    tokens,
+		logger:    logger,
+		dummyHash: dummyHash,
 	}
 }
 
@@ -86,28 +96,41 @@ func (s *AuthService) Register(ctx context.Context, email, password string) (str
 }
 
 // Login authenticates a user and returns a signed JWT token.
+// This implementation is protected against timing attacks by always performing
+// password verification, even when the user doesn't exist.
 func (s *AuthService) Login(ctx context.Context, email, password string) (string, error) {
 	user, err := s.users.FindByEmail(ctx, email)
+	
+	// Determine which hash to verify against.
+	// If user doesn't exist, use dummy hash to maintain constant time.
+	hashToVerify := s.dummyHash
+	var userID string
+	userExists := err == nil
+
+	if userExists {
+		hashToVerify = user.PasswordHash.String()
+		userID = user.ID
+	}
+
+	// Always perform password verification, regardless of whether user exists.
+	// This prevents timing attacks that could enumerate valid email addresses.
+	ok, err := s.hasher.Verify(ctx, password, hashToVerify)
 	if err != nil {
+		s.logger.ErrorContext(ctx, "failed to verify password", slog.String("error", err.Error()))
 		return "", domain.ErrInvalidCredentials
 	}
 
-	ok, err := s.hasher.Verify(ctx, password, user.PasswordHash.String())
-	if err != nil {
-		s.logger.ErrorContext(ctx, "failed to verify password", slog.String("email", email), slog.String("error", err.Error()))
+	// Only proceed if user exists AND password is correct
+	if !userExists || !ok {
 		return "", domain.ErrInvalidCredentials
 	}
 
-	if !ok {
-		return "", domain.ErrInvalidCredentials
-	}
-
-	token, err := s.tokens.Generate(ctx, user.ID)
+	token, err := s.tokens.Generate(ctx, userID)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "failed to generate token", slog.String("user_id", user.ID), slog.String("error", err.Error()))
+		s.logger.ErrorContext(ctx, "failed to generate token", slog.String("user_id", userID), slog.String("error", err.Error()))
 		return "", fmt.Errorf("generating token: %w", err)
 	}
 
-	s.logger.InfoContext(ctx, "user logged in", slog.String("user_id", user.ID))
+	s.logger.InfoContext(ctx, "user logged in", slog.String("user_id", userID))
 	return token, nil
 }
