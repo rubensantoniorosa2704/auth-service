@@ -22,11 +22,32 @@ type CustomClaims struct {
 }
 
 // NewJWTService returns a new JWTService with the given signing secret and issuer.
-func NewJWTService(secret string, issuer string) *JWTService {
+// It validates that the secret meets minimum security requirements.
+func NewJWTService(secret string, issuer string) (*JWTService, error) {
+	if err := validateSecret(secret); err != nil {
+		return nil, fmt.Errorf("invalid JWT secret: %w", err)
+	}
+
 	return &JWTService{
 		secretKey: []byte(secret),
 		issuer:    issuer,
+	}, nil
+}
+
+// validateSecret ensures the JWT secret meets minimum security requirements.
+// For HMAC-SHA256 (HS256), NIST recommends a key length equal to the hash output (256 bits = 32 bytes).
+func validateSecret(secret string) error {
+	const minSecretLength = 32
+
+	if secret == "" {
+		return errors.New("secret cannot be empty")
 	}
+
+	if len(secret) < minSecretLength {
+		return fmt.Errorf("secret must be at least %d bytes long, got %d", minSecretLength, len(secret))
+	}
+
+	return nil
 }
 
 // Generate creates a signed JWT token for the given user ID.
