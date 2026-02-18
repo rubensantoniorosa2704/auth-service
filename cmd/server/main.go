@@ -9,7 +9,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/joho/godotenv"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 
@@ -28,20 +27,16 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	if err := godotenv.Load(); err != nil {
-		slog.Warn("no .env file found, using system environment variables")
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Database
 	dbCfg := db.Config{
-		Host:            getEnv("DB_HOST", getEnv("POSTGRES_HOST", "localhost")),
-		Port:            getEnv("DB_PORT", getEnv("POSTGRES_PORT", "5432")),
-		User:            getEnv("DB_USER", getEnv("POSTGRES_USER", "postgres")),
-		Password:        getEnv("DB_PASSWORD", getEnv("POSTGRES_PASSWORD", "")),
-		DBName:          getEnv("DB_NAME", getEnv("POSTGRES_DB", "auth")),
+		Host:            requireEnv("POSTGRES_HOST"),
+		Port:            requireEnv("POSTGRES_PORT"),
+		User:            requireEnv("POSTGRES_USER"),
+		Password:        requireEnv("POSTGRES_PASSWORD"),
+		DBName:          requireEnv("POSTGRES_DB"),
 		SSLMode:         getEnv("DB_SSLMODE", "disable"),
 		MaxOpenConns:    25,
 		MaxIdleConns:    5,
@@ -59,11 +54,7 @@ func main() {
 	userRepo := db.NewPostgresUserRepository(pool)
 	hasher := encryption.NewArgon2Hasher()
 	
-	jwtSecret := os.Getenv("JWT_SECRET")
-	if jwtSecret == "" {
-		slog.Error("JWT_SECRET environment variable is required")
-		os.Exit(1)
-	}
+	jwtSecret := requireEnv("JWT_SECRET")
 	
 	tokenSvc, err := tokens.NewJWTService(jwtSecret, "auth-service")
 	if err != nil {
@@ -106,6 +97,16 @@ func main() {
 	server.GracefulStop()
 	cancel()
 	slog.Info("server stopped gracefully")
+}
+
+// requireEnv returns the value of a required environment variable or exits if not set.
+func requireEnv(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		slog.Error("required environment variable not set", slog.String("variable", key))
+		os.Exit(1)
+	}
+	return v
 }
 
 // getEnv returns the value of an environment variable or a default fallback.
