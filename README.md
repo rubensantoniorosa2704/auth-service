@@ -80,8 +80,29 @@ make test
 | `DB_PASSWORD`   | PostgreSQL password          | —           |
 | `DB_NAME`       | Database name                | `auth`      |
 | `DB_SSLMODE`    | SSL mode                     | `disable`   |
-| `JWT_SECRET`    | Secret key for JWT signing   | —           |
+| `JWT_SECRET`    | Secret key for JWT signing (min 32 bytes) | —           |
 | `GRPC_PORT`     | Port for gRPC server         | `50051`     |
+
+### Generating a Secure JWT Secret
+
+The JWT secret must be at least 32 bytes long for security. You can generate a secure random secret using:
+
+```bash
+# Using OpenSSL (recommended)
+openssl rand -base64 32
+
+# Using Go
+go run -e 'package main; import ("crypto/rand"; "encoding/base64"; "fmt"); func main() { b := make([]byte, 32); rand.Read(b); fmt.Println(base64.StdEncoding.EncodeToString(b)) }'
+
+# Using Python
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+Copy the generated value to your `.env` file:
+
+```bash
+JWT_SECRET=your-generated-secret-here
+```
 
 ## License
 

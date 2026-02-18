@@ -58,7 +58,18 @@ func main() {
 	// Adapters
 	userRepo := db.NewPostgresUserRepository(pool)
 	hasher := encryption.NewArgon2Hasher()
-	tokenSvc := tokens.NewJWTService(os.Getenv("JWT_SECRET"), "auth-service")
+	
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		slog.Error("JWT_SECRET environment variable is required")
+		os.Exit(1)
+	}
+	
+	tokenSvc, err := tokens.NewJWTService(jwtSecret, "auth-service")
+	if err != nil {
+		slog.Error("failed to initialize JWT service", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
 
 	// Service
 	authService := services.NewAuthService(userRepo, hasher, tokenSvc, logger)
