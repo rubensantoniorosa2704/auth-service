@@ -37,7 +37,8 @@ func newTestDB(t *testing.T) *pgxpool.Pool {
 		postgres.WithUsername("test"),
 		postgres.WithPassword("test"),
 		testcontainers.WithWaitStrategy(
-			wait.ForListeningPort("5432/tcp"),
+			wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2),
 		),
 	)
 	require.NoError(t, err, "failed to start postgres container")
