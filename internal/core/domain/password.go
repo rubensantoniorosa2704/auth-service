@@ -1,5 +1,12 @@
 package domain
 
+const (
+	// MinPasswordLength is the minimum allowed password length (NIST 800-63B recommendation)
+	MinPasswordLength = 12
+	// MaxPasswordLength is the maximum allowed password length to prevent DoS attacks
+	MaxPasswordLength = 128
+)
+
 // Password is a value object for a raw (unhashed) password.
 // It enforces minimum strength requirements before hashing.
 type Password struct {
@@ -8,8 +15,12 @@ type Password struct {
 
 // NewPassword validates a raw password and returns a Password value object.
 func NewPassword(raw string) (Password, error) {
-	if len(raw) < 8 {
+	if len(raw) < MinPasswordLength {
 		return Password{}, ErrWeakPassword
+	}
+
+	if len(raw) > MaxPasswordLength {
+		return Password{}, ErrPasswordTooLong
 	}
 
 	return Password{value: raw}, nil

@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -18,11 +19,11 @@ func TestNewPassword(t *testing.T) {
 		wantErr error
 	}{
 		{
-			name:  "valid password with exactly 8 characters",
-			input: "12345678",
+			name:  "valid password with exactly 12 characters",
+			input: "123456789abc",
 		},
 		{
-			name:  "valid password longer than 8 characters",
+			name:  "valid password longer than 12 characters",
 			input: "a-very-secure-passphrase",
 		},
 		{
@@ -30,14 +31,23 @@ func TestNewPassword(t *testing.T) {
 			input: "P@ssw0rd!#$%",
 		},
 		{
+			name:  "valid password with exactly 128 characters",
+			input: "a" + strings.Repeat("b", 126) + "c", // 128 chars
+		},
+		{
 			name:    "empty password",
 			input:   "",
 			wantErr: domain.ErrWeakPassword,
 		},
 		{
-			name:    "password with 7 characters — one below minimum",
-			input:   "1234567",
+			name:    "password with 11 characters — one below minimum",
+			input:   "123456789ab",
 			wantErr: domain.ErrWeakPassword,
+		},
+		{
+			name:    "password with 129 characters — exceeds maximum",
+			input:   strings.Repeat("a", 129),
+			wantErr: domain.ErrPasswordTooLong,
 		},
 	}
 
