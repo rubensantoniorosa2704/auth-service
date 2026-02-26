@@ -11,8 +11,9 @@ import (
 
 // JWTService implements ports.TokenService using JSON Web Tokens.
 type JWTService struct {
-	secretKey []byte
-	issuer    string
+	secretKey          []byte
+	issuer             string
+	expirationDuration time.Duration
 }
 
 // CustomClaims extends the standard JWT claims with a user identifier.
@@ -21,16 +22,21 @@ type CustomClaims struct {
 	jwt.RegisteredClaims
 }
 
-// NewJWTService returns a new JWTService with the given signing secret and issuer.
-// It validates that the secret meets minimum security requirements.
-func NewJWTService(secret string, issuer string) (*JWTService, error) {
+// NewJWTService returns a new JWTService with the given signing secret, issuer, and expiration hours.
+// It validates that the secret meets minimum security requirements and that expirationHours is positive.
+func NewJWTService(secret string, issuer string, expirationHours int) (*JWTService, error) {
 	if err := validateSecret(secret); err != nil {
 		return nil, fmt.Errorf("invalid JWT secret: %w", err)
 	}
 
+	if expirationHours <= 0 {
+		return nil, fmt.Errorf("expiration hours must be positive, got %d", expirationHours)
+	}
+
 	return &JWTService{
-		secretKey: []byte(secret),
-		issuer:    issuer,
+		secretKey:          []byte(secret),
+		issuer:             issuer,
+		expirationDuration: time.Duration(expirationHours) * time.Hour,
 	}, nil
 }
 
@@ -55,7 +61,7 @@ func (s *JWTService) Generate(_ context.Context, userID string) (string, error) 
 	claims := &CustomClaims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(s.expirationDuration)),
 			Issuer:    s.issuer,
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},

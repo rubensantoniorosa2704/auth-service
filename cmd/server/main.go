@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -53,10 +54,21 @@ func main() {
 	// Adapters
 	userRepo := db.NewPostgresUserRepository(pool)
 	hasher := encryption.NewArgon2Hasher()
-	
+
 	jwtSecret := requireEnv("JWT_SECRET")
-	
-	tokenSvc, err := tokens.NewJWTService(jwtSecret, "auth-service")
+
+	// Load JWT expiration hours from environment variable
+	// Default to 1 hour per OWASP security guidelines
+	jwtExpirationHoursStr := getEnv("JWT_EXPIRATION_HOURS", "1")
+	jwtExpirationHours, err := strconv.Atoi(jwtExpirationHoursStr)
+	if err != nil {
+		slog.Error("invalid JWT_EXPIRATION_HOURS value",
+			slog.String("value", jwtExpirationHoursStr),
+			slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	tokenSvc, err := tokens.NewJWTService(jwtSecret, "auth-service", jwtExpirationHours)
 	if err != nil {
 		slog.Error("failed to initialize JWT service", slog.String("error", err.Error()))
 		os.Exit(1)

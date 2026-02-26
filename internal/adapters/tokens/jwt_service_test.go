@@ -21,7 +21,7 @@ const (
 func newJWTService(t *testing.T) *tokens.JWTService {
 	t.Helper()
 
-	svc, err := tokens.NewJWTService(validSecret, validIssuer)
+	svc, err := tokens.NewJWTService(validSecret, validIssuer, 24)
 	require.NoError(t, err, "newJWTService: unexpected error creating service")
 
 	return svc
@@ -35,42 +35,64 @@ func TestNewJWTService(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		secret      string
-		issuer      string
-		wantErr     bool
-		errContains string
+		name            string
+		secret          string
+		issuer          string
+		expirationHours int
+		wantErr         bool
+		errContains     string
 	}{
 		{
-			name:   "valid secret with exactly 32 bytes",
-			secret: "12345678901234567890123456789012",
-			issuer: validIssuer,
+			name:            "valid secret with exactly 32 bytes",
+			secret:          "12345678901234567890123456789012",
+			issuer:          validIssuer,
+			expirationHours: 24,
 		},
 		{
-			name:   "valid secret longer than 32 bytes",
-			secret: "this-is-a-very-long-secret-with-more-than-32-bytes-for-extra-security",
-			issuer: validIssuer,
+			name:            "valid secret longer than 32 bytes",
+			secret:          "this-is-a-very-long-secret-with-more-than-32-bytes-for-extra-security",
+			issuer:          validIssuer,
+			expirationHours: 24,
 		},
 		{
-			name:        "empty secret",
-			secret:      "",
-			issuer:      validIssuer,
-			wantErr:     true,
-			errContains: "secret cannot be empty",
+			name:            "empty secret",
+			secret:          "",
+			issuer:          validIssuer,
+			expirationHours: 24,
+			wantErr:         true,
+			errContains:     "secret cannot be empty",
 		},
 		{
-			name:        "secret with 9 bytes — too short",
-			secret:      "short-key",
-			issuer:      validIssuer,
-			wantErr:     true,
-			errContains: "secret must be at least 32 bytes long",
+			name:            "secret with 9 bytes — too short",
+			secret:          "short-key",
+			issuer:          validIssuer,
+			expirationHours: 24,
+			wantErr:         true,
+			errContains:     "secret must be at least 32 bytes long",
 		},
 		{
-			name:        "secret with 31 bytes — one byte below minimum",
-			secret:      "almost-valid-but-one-byte-shor",
-			issuer:      validIssuer,
-			wantErr:     true,
-			errContains: "secret must be at least 32 bytes long",
+			name:            "secret with 31 bytes — one byte below minimum",
+			secret:          "almost-valid-but-one-byte-shor",
+			issuer:          validIssuer,
+			expirationHours: 24,
+			wantErr:         true,
+			errContains:     "secret must be at least 32 bytes long",
+		},
+		{
+			name:            "zero expiration hours",
+			secret:          validSecret,
+			issuer:          validIssuer,
+			expirationHours: 0,
+			wantErr:         true,
+			errContains:     "expiration hours must be positive",
+		},
+		{
+			name:            "negative expiration hours",
+			secret:          validSecret,
+			issuer:          validIssuer,
+			expirationHours: -5,
+			wantErr:         true,
+			errContains:     "expiration hours must be positive",
 		},
 	}
 
@@ -78,7 +100,7 @@ func TestNewJWTService(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			svc, err := tokens.NewJWTService(tt.secret, tt.issuer)
+			svc, err := tokens.NewJWTService(tt.secret, tt.issuer, tt.expirationHours)
 
 			if tt.wantErr {
 				require.Error(t, err)
@@ -181,7 +203,7 @@ func TestJWTService_Validate(t *testing.T) {
 			buildToken: func(t *testing.T, _ *tokens.JWTService) string {
 				t.Helper()
 				otherSecret := "outrosecretcompletatmente-diferente-32b"
-				otherSvc, err := tokens.NewJWTService(otherSecret, validIssuer)
+				otherSvc, err := tokens.NewJWTService(otherSecret, validIssuer, 24)
 				require.NoError(t, err)
 				token, err := otherSvc.Generate(context.Background(), "user-xyz")
 				require.NoError(t, err)
@@ -249,4 +271,431 @@ func TestJWTService_RoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, originalID, recoveredID, "user ID must be preserved through round-trip")
+}
+
+// =====================
+// Bug Condition Exploration Test
+// =====================
+
+// TestJWTService_HardcodedExpiration_BugCondition verifies the expected behavior:
+// tokens use configurable expiration duration from the constructor parameter.
+// This test validates that the bug fix works correctly with multiple configurations.
+//
+// **Validates: Requirements 2.1, 2.2, 2.4**
+func TestJWTService_HardcodedExpiration_BugCondition(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name            string
+		expirationHours int
+	}{
+		{"1-hour configuration", 1},
+		{"8-hour configuration", 8},
+		{"24-hour configuration", 24},
+	}
+
+	for _, tc := range testCases {
+		tc := tc // capture range variable
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Create JWT service with specific expiration configuration
+			svc, err := tokens.NewJWTService(validSecret, "auth-service", tc.expirationHours)
+			require.NoError(t, err)
+
+			ctx := context.Background()
+
+			// Generate a token
+			tokenStr, err := svc.Generate(ctx, "test-user-123")
+			require.NoError(t, err)
+			require.NotEmpty(t, tokenStr)
+
+			// Parse the token to extract claims
+			token, err := jwt.ParseWithClaims(tokenStr, &tokens.CustomClaims{}, func(token *jwt.Token) (interface{}, error) {
+				return []byte(validSecret), nil
+			})
+			require.NoError(t, err)
+			require.True(t, token.Valid)
+
+			claims, ok := token.Claims.(*tokens.CustomClaims)
+			require.True(t, ok)
+			require.NotNil(t, claims.IssuedAt)
+			require.NotNil(t, claims.ExpiresAt)
+
+			// Calculate the actual duration between IssuedAt and ExpiresAt
+			issuedAt := claims.IssuedAt.Time
+			expiresAt := claims.ExpiresAt.Time
+			actualDuration := expiresAt.Sub(issuedAt)
+
+			// EXPECTED BEHAVIOR: Token should have configured expiration
+			expectedDuration := time.Duration(tc.expirationHours) * time.Hour
+
+			// Allow 1 second tolerance for clock skew during test execution
+			tolerance := 1 * time.Second
+			diff := actualDuration - expectedDuration
+			if diff < 0 {
+				diff = -diff
+			}
+
+			assert.True(t, diff <= tolerance,
+				"Expected behavior confirmed: token has configured expiration. "+
+					"Expected: %v, Got: %v (diff: %v)",
+				expectedDuration, actualDuration, diff)
+
+			t.Logf("✓ Token has correct expiration of %v (IssuedAt: %v, ExpiresAt: %v)",
+				actualDuration, issuedAt, expiresAt)
+		})
+	}
+}
+
+// =====================
+// Preservation Property Tests
+// =====================
+// These tests verify that existing JWT functionality remains unchanged
+// when the configurable expiration fix is implemented.
+// They MUST PASS on unfixed code to establish baseline behavior.
+//
+// **Validates: Requirements 3.1, 3.2, 3.3, 3.4, 3.5**
+
+// TestJWTService_Preservation_SecretValidation verifies that minimum 32-byte
+// secret validation continues to work exactly as before.
+//
+// **Validates: Requirement 3.1**
+func TestJWTService_Preservation_SecretValidation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		secret      string
+		shouldPass  bool
+		errContains string
+	}{
+		{
+			name:       "accepts exactly 32 bytes",
+			secret:     "12345678901234567890123456789012",
+			shouldPass: true,
+		},
+		{
+			name:       "accepts more than 32 bytes",
+			secret:     "this-is-a-very-long-secret-with-more-than-32-bytes",
+			shouldPass: true,
+		},
+		{
+			name:        "rejects empty secret",
+			secret:      "",
+			shouldPass:  false,
+			errContains: "secret cannot be empty",
+		},
+		{
+			name:        "rejects 31 bytes",
+			secret:      "1234567890123456789012345678901",
+			shouldPass:  false,
+			errContains: "secret must be at least 32 bytes long",
+		},
+		{
+			name:        "rejects 16 bytes",
+			secret:      "1234567890123456",
+			shouldPass:  false,
+			errContains: "secret must be at least 32 bytes long",
+		},
+		{
+			name:        "rejects 8 bytes",
+			secret:      "12345678",
+			shouldPass:  false,
+			errContains: "secret must be at least 32 bytes long",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			svc, err := tokens.NewJWTService(tt.secret, validIssuer, 24)
+
+			if tt.shouldPass {
+				require.NoError(t, err, "secret validation should pass")
+				assert.NotNil(t, svc, "service should be created")
+			} else {
+				require.Error(t, err, "secret validation should fail")
+				assert.ErrorContains(t, err, tt.errContains)
+				assert.Nil(t, svc, "service should be nil on error")
+			}
+		})
+	}
+}
+
+// TestJWTService_Preservation_TokenSigning verifies that tokens are still
+// signed with HS256 and contain correct issuer and issued-at claims.
+//
+// **Validates: Requirement 3.2**
+func TestJWTService_Preservation_TokenSigning(t *testing.T) {
+	t.Parallel()
+
+	svc := newJWTService(t)
+	ctx := context.Background()
+
+	userIDs := []string{
+		"user-123",
+		"550e8400-e29b-41d4-a716-446655440000",
+		"admin-user",
+		"test@example.com",
+		"",
+	}
+
+	for _, userID := range userIDs {
+		t.Run("userID="+userID, func(t *testing.T) {
+			beforeGenerate := time.Now()
+			tokenStr, err := svc.Generate(ctx, userID)
+			afterGenerate := time.Now()
+
+			require.NoError(t, err)
+			require.NotEmpty(t, tokenStr)
+
+			// Parse token to verify claims
+			token, err := jwt.ParseWithClaims(tokenStr, &tokens.CustomClaims{}, func(token *jwt.Token) (interface{}, error) {
+				// Verify signing method is HS256
+				method, ok := token.Method.(*jwt.SigningMethodHMAC)
+				assert.True(t, ok, "token must use HMAC signing method")
+				assert.Equal(t, "HS256", method.Alg(), "token must use HS256 algorithm")
+				return []byte(validSecret), nil
+			})
+
+			require.NoError(t, err)
+			require.True(t, token.Valid)
+
+			claims, ok := token.Claims.(*tokens.CustomClaims)
+			require.True(t, ok)
+
+			// Verify issuer claim
+			assert.Equal(t, validIssuer, claims.Issuer, "issuer claim must be set correctly")
+
+			// Verify issued-at claim is set and reasonable
+			require.NotNil(t, claims.IssuedAt, "issued-at claim must be set")
+			issuedAt := claims.IssuedAt.Time
+			assert.True(t, issuedAt.After(beforeGenerate.Add(-1*time.Second)),
+				"issued-at should be after token generation started")
+			assert.True(t, issuedAt.Before(afterGenerate.Add(1*time.Second)),
+				"issued-at should be before token generation completed")
+
+			// Verify user ID is embedded correctly
+			assert.Equal(t, userID, claims.UserID, "user ID must be embedded in claims")
+		})
+	}
+}
+
+// TestJWTService_Preservation_TokenValidation verifies that signature verification,
+// expiration checking, and user ID extraction work identically.
+//
+// **Validates: Requirement 3.3**
+func TestJWTService_Preservation_TokenValidation(t *testing.T) {
+	t.Parallel()
+
+	svc := newJWTService(t)
+	ctx := context.Background()
+
+	t.Run("validates correctly signed token", func(t *testing.T) {
+		tokenStr, err := svc.Generate(ctx, "user-valid")
+		require.NoError(t, err)
+
+		userID, err := svc.Validate(ctx, tokenStr)
+		require.NoError(t, err)
+		assert.Equal(t, "user-valid", userID)
+	})
+
+	t.Run("rejects token with wrong signature", func(t *testing.T) {
+		// Create token with different secret
+		otherSecret := "different-secret-with-32-bytes-min"
+		otherSvc, err := tokens.NewJWTService(otherSecret, validIssuer, 24)
+		require.NoError(t, err)
+
+		tokenStr, err := otherSvc.Generate(ctx, "user-other")
+		require.NoError(t, err)
+
+		// Try to validate with original service (different secret)
+		userID, err := svc.Validate(ctx, tokenStr)
+		require.Error(t, err, "should reject token signed with different secret")
+		assert.Empty(t, userID)
+	})
+
+	t.Run("rejects expired token", func(t *testing.T) {
+		// Create an expired token manually
+		claims := &tokens.CustomClaims{
+			UserID: "expired-user",
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(-1 * time.Hour)),
+				Issuer:    validIssuer,
+				IssuedAt:  jwt.NewNumericDate(time.Now().Add(-2 * time.Hour)),
+			},
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		tokenStr, err := token.SignedString([]byte(validSecret))
+		require.NoError(t, err)
+
+		// Validate should reject expired token
+		userID, err := svc.Validate(ctx, tokenStr)
+		require.Error(t, err, "should reject expired token")
+		assert.Empty(t, userID)
+	})
+
+	t.Run("extracts user ID correctly", func(t *testing.T) {
+		testUserIDs := []string{
+			"user-123",
+			"550e8400-e29b-41d4-a716-446655440000",
+			"admin@example.com",
+			"",
+		}
+
+		for _, expectedUserID := range testUserIDs {
+			tokenStr, err := svc.Generate(ctx, expectedUserID)
+			require.NoError(t, err)
+
+			actualUserID, err := svc.Validate(ctx, tokenStr)
+			require.NoError(t, err)
+			assert.Equal(t, expectedUserID, actualUserID,
+				"user ID extraction must work correctly")
+		}
+	})
+}
+
+// TestJWTService_Preservation_RoundTrip verifies that user ID survives
+// generate → validate cycle unchanged.
+//
+// **Validates: Requirement 3.3**
+func TestJWTService_Preservation_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	svc := newJWTService(t)
+	ctx := context.Background()
+
+	testCases := []struct {
+		name   string
+		userID string
+	}{
+		{"UUID", "550e8400-e29b-41d4-a716-446655440000"},
+		{"simple string", "user-123"},
+		{"email format", "test@example.com"},
+		{"empty string", ""},
+		{"special chars", "user!@#$%^&*()"},
+		{"long string", "this-is-a-very-long-user-id-with-many-characters-to-test-preservation"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Generate token
+			tokenStr, err := svc.Generate(ctx, tc.userID)
+			require.NoError(t, err)
+			require.NotEmpty(t, tokenStr)
+
+			// Validate token
+			recoveredUserID, err := svc.Validate(ctx, tokenStr)
+			require.NoError(t, err)
+
+			// Verify user ID is preserved exactly
+			assert.Equal(t, tc.userID, recoveredUserID,
+				"user ID must be preserved through round-trip")
+		})
+	}
+}
+
+// TestJWTService_Preservation_ErrorHandling verifies that invalid tokens,
+// wrong secrets, and malformed JWTs are rejected identically.
+//
+// **Validates: Requirement 3.5**
+func TestJWTService_Preservation_ErrorHandling(t *testing.T) {
+	t.Parallel()
+
+	svc := newJWTService(t)
+	ctx := context.Background()
+
+	tests := []struct {
+		name       string
+		buildToken func(t *testing.T) string
+		wantErr    bool
+	}{
+		{
+			name:       "empty token",
+			buildToken: func(t *testing.T) string { return "" },
+			wantErr:    true,
+		},
+		{
+			name:       "random string",
+			buildToken: func(t *testing.T) string { return "not-a-jwt-token" },
+			wantErr:    true,
+		},
+		{
+			name:       "malformed JWT (wrong format)",
+			buildToken: func(t *testing.T) string { return "a.b.c" },
+			wantErr:    true,
+		},
+		{
+			name:       "malformed JWT (only two parts)",
+			buildToken: func(t *testing.T) string { return "header.payload" },
+			wantErr:    true,
+		},
+		{
+			name: "token with wrong secret",
+			buildToken: func(t *testing.T) string {
+				otherSecret := "another-secret-with-32-bytes-here"
+				otherSvc, err := tokens.NewJWTService(otherSecret, validIssuer, 24)
+				require.NoError(t, err)
+				tokenStr, err := otherSvc.Generate(ctx, "user-xyz")
+				require.NoError(t, err)
+				return tokenStr
+			},
+			wantErr: true,
+		},
+		{
+			name: "expired token",
+			buildToken: func(t *testing.T) string {
+				claims := &tokens.CustomClaims{
+					UserID: "expired-user",
+					RegisteredClaims: jwt.RegisteredClaims{
+						ExpiresAt: jwt.NewNumericDate(time.Now().Add(-1 * time.Hour)),
+						Issuer:    validIssuer,
+						IssuedAt:  jwt.NewNumericDate(time.Now().Add(-2 * time.Hour)),
+					},
+				}
+				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+				tokenStr, err := token.SignedString([]byte(validSecret))
+				require.NoError(t, err)
+				return tokenStr
+			},
+			wantErr: true,
+		},
+		{
+			name: "token with invalid signature (tampered)",
+			buildToken: func(t *testing.T) string {
+				tokenStr, err := svc.Generate(ctx, "user-123")
+				require.NoError(t, err)
+				// Tamper with the token by changing a character
+				return tokenStr[:len(tokenStr)-5] + "XXXXX"
+			},
+			wantErr: true,
+		},
+		{
+			name: "valid token should not error",
+			buildToken: func(t *testing.T) string {
+				tokenStr, err := svc.Generate(ctx, "valid-user")
+				require.NoError(t, err)
+				return tokenStr
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tokenStr := tt.buildToken(t)
+
+			userID, err := svc.Validate(ctx, tokenStr)
+
+			if tt.wantErr {
+				require.Error(t, err, "should reject invalid token")
+				assert.Empty(t, userID, "user ID should be empty on error")
+			} else {
+				require.NoError(t, err, "should accept valid token")
+				assert.NotEmpty(t, userID, "user ID should be extracted")
+			}
+		})
+	}
 }
