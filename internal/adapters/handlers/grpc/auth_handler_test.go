@@ -205,6 +205,7 @@ func TestAuthGRPCHandler_ErrorMapping(t *testing.T) {
 		{domain.ErrWeakPassword, codes.InvalidArgument},
 		{domain.ErrInvalidCredentials, codes.Unauthenticated},
 		{domain.ErrUserNotFound, codes.NotFound},
+		{domain.ErrInvalidUUID, codes.InvalidArgument},
 		{assert.AnError, codes.Internal},
 	}
 

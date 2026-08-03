@@ -62,6 +62,8 @@ func mapDomainError(err error) error {
 		return status.Error(codes.Unauthenticated, "invalid credentials")
 	case errors.Is(err, domain.ErrUserNotFound):
 		return status.Error(codes.NotFound, "user not found")
+	case errors.Is(err, domain.ErrInvalidUUID):
+		return status.Error(codes.InvalidArgument, "invalid UUID format")
 	default:
 		return status.Error(codes.Internal, "internal server error")
 	}

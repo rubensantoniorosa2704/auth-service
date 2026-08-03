@@ -9,4 +9,5 @@ var (
 	ErrInvalidEmail       = errors.New("invalid email format")
 	ErrWeakPassword       = errors.New("password must be at least 12 characters long")
 	ErrPasswordTooLong    = errors.New("password must not exceed 128 characters")
+	ErrInvalidUUID        = errors.New("invalid UUID format")
 )
