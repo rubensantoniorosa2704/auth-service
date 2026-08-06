@@ -152,6 +152,45 @@ func TestPostgresRepository_FindByEmail(t *testing.T) {
 }
 
 // =====================
+// UpdateLastLogin tests
+// =====================
+
+func TestPostgresRepository_UpdateLastLogin(t *testing.T) {
+	t.Parallel()
+
+	pool := newTestDB(t)
+	repo := adapterdb.NewPostgresUserRepository(pool)
+	ctx := context.Background()
+
+	user := buildTestUser(t, "550e8400-e29b-41d4-a716-446655440010", "lastlogin@example.com")
+	require.NoError(t, repo.Save(ctx, user), "failed to seed user")
+
+	t.Run("sets last_login_at on first login", func(t *testing.T) {
+		loginTime := time.Now().UTC().Truncate(time.Millisecond)
+
+		err := repo.UpdateLastLogin(ctx, user.ID, loginTime)
+		require.NoError(t, err)
+
+		found, err := repo.FindByEmail(ctx, "lastlogin@example.com")
+		require.NoError(t, err)
+		require.NotNil(t, found.LastLoginAt, "expected LastLoginAt to be set")
+		assert.WithinDuration(t, loginTime, *found.LastLoginAt, time.Millisecond)
+	})
+
+	t.Run("updates last_login_at on subsequent login", func(t *testing.T) {
+		laterTime := time.Now().Add(time.Hour).UTC().Truncate(time.Millisecond)
+
+		err := repo.UpdateLastLogin(ctx, user.ID, laterTime)
+		require.NoError(t, err)
+
+		found, err := repo.FindByEmail(ctx, "lastlogin@example.com")
+		require.NoError(t, err)
+		require.NotNil(t, found.LastLoginAt)
+		assert.WithinDuration(t, laterTime, *found.LastLoginAt, time.Millisecond)
+	})
+}
+
+// =====================
 // Round-trip test
 // =====================
 
@@ -175,4 +214,6 @@ func TestPostgresRepository_RoundTrip(t *testing.T) {
 	assert.Equal(t, original.PasswordHash.String(), found.PasswordHash.String())
 	// PostgreSQL does not store nanoseconds, so we truncate to milliseconds before comparing.
 	assert.WithinDuration(t, original.CreatedAt, found.CreatedAt, time.Millisecond)
+	// A freshly registered user has never logged in.
+	assert.Nil(t, found.LastLoginAt, "expected LastLoginAt to be nil for a new user")
 }

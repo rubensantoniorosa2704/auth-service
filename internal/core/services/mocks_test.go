@@ -3,6 +3,7 @@ package services_test
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/rubensantoniorosa2704/auth-service/internal/core/domain"
 )
@@ -32,6 +33,17 @@ func (f *fakeUserRepo) FindByEmail(_ context.Context, email string) (*domain.Use
 		return nil, errors.New("user not found")
 	}
 	return user, nil
+}
+
+func (f *fakeUserRepo) UpdateLastLogin(_ context.Context, userID string, _ time.Time) error {
+	for _, u := range f.users {
+		if u.ID == userID {
+			now := time.Now()
+			u.LastLoginAt = &now
+			return nil
+		}
+	}
+	return errors.New("user not found")
 }
 
 // =====================
