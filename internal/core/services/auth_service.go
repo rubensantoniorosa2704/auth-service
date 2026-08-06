@@ -131,6 +131,12 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 		return "", fmt.Errorf("generating token: %w", err)
 	}
 
+	// Record the login timestamp. A failure here is non-fatal: the token was already
+	// generated and the user is authenticated. We log the error but do not block the response.
+	if err := s.users.UpdateLastLogin(ctx, userID, time.Now()); err != nil {
+		s.logger.WarnContext(ctx, "failed to update last login timestamp", slog.String("user_id", userID), slog.String("error", err.Error()))
+	}
+
 	s.logger.InfoContext(ctx, "user logged in", slog.String("user_id", userID))
 	return token, nil
 }
