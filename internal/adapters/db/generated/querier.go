@@ -14,6 +14,7 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
+	UpdateLastLogin(ctx context.Context, arg UpdateLastLoginParams) error
 }
 
 var _ Querier = (*Queries)(nil)

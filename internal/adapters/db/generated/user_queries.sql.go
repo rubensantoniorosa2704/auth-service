@@ -17,7 +17,7 @@ INSERT INTO users (
 ) VALUES (
     $1, $2, $3, $4, $5
 )
-RETURNING id, email, password_hash, created_at, updated_at
+RETURNING id, email, password_hash, created_at, updated_at, last_login_at
 `
 
 type CreateUserParams struct {
@@ -43,12 +43,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LastLoginAt,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, created_at, updated_at
+SELECT id, email, password_hash, created_at, updated_at, last_login_at
 FROM users
 WHERE email = $1 LIMIT 1
 `
@@ -62,12 +63,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LastLoginAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, created_at, updated_at
+SELECT id, email, password_hash, created_at, updated_at, last_login_at
 FROM users
 WHERE id = $1 LIMIT 1
 `
@@ -81,6 +83,21 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LastLoginAt,
 	)
 	return i, err
+}
+
+const updateLastLogin = `-- name: UpdateLastLogin :exec
+UPDATE users SET last_login_at = $2 WHERE id = $1
+`
+
+type UpdateLastLoginParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	LastLoginAt pgtype.Timestamptz `json:"last_login_at"`
+}
+
+func (q *Queries) UpdateLastLogin(ctx context.Context, arg UpdateLastLoginParams) error {
+	_, err := q.db.Exec(ctx, updateLastLogin, arg.ID, arg.LastLoginAt)
+	return err
 }

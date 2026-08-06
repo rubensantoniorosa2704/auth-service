@@ -14,4 +14,5 @@ type User struct {
 	PasswordHash string             `json:"password_hash"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	LastLoginAt  pgtype.Timestamptz `json:"last_login_at"`
 }

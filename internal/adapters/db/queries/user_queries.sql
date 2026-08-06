@@ -7,11 +7,14 @@ INSERT INTO users (
 RETURNING *;
 
 -- name: GetUserByEmail :one
-SELECT id, email, password_hash, created_at, updated_at
+SELECT id, email, password_hash, created_at, updated_at, last_login_at
 FROM users
 WHERE email = $1 LIMIT 1;
 
 -- name: GetUserByID :one
-SELECT id, email, password_hash, created_at, updated_at
+SELECT id, email, password_hash, created_at, updated_at, last_login_at
 FROM users
 WHERE id = $1 LIMIT 1;
+
+-- name: UpdateLastLogin :exec
+UPDATE users SET last_login_at = $2 WHERE id = $1;
