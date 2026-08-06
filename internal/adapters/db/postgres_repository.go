@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -79,10 +80,35 @@ func (r *PostgresUserRepository) FindByEmail(ctx context.Context, email string) 
 		return nil, fmt.Errorf("reconstructing password hash: %w", err)
 	}
 
+	var lastLoginAt *time.Time
+	if u.LastLoginAt.Valid {
+		t := u.LastLoginAt.Time
+		lastLoginAt = &t
+	}
+
 	return &domain.User{
 		ID:           idStr,
 		Email:        emailVO,
 		PasswordHash: passVO,
 		CreatedAt:    u.CreatedAt.Time,
+		LastLoginAt:  lastLoginAt,
 	}, nil
+}
+
+// UpdateLastLogin sets the last_login_at timestamp for the given user ID.
+func (r *PostgresUserRepository) UpdateLastLogin(ctx context.Context, userID string, t time.Time) error {
+	var uuidPG pgtype.UUID
+	if err := uuidPG.Scan(userID); err != nil {
+		return fmt.Errorf("scanning uuid: %w", err)
+	}
+
+	err := r.q.UpdateLastLogin(ctx, generated.UpdateLastLoginParams{
+		ID:          uuidPG,
+		LastLoginAt: pgtype.Timestamptz{Time: t, Valid: true},
+	})
+	if err != nil {
+		return fmt.Errorf("updating last login: %w", err)
+	}
+
+	return nil
 }
